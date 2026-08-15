@@ -11,16 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import the router that holds the /notices endpoints.
 from backend.controllers.notice_controller import router as notice_router
 
-# Base is what our models (like Notice) inherit from — it holds the
-# in-memory picture of what our tables should look like.
-from backend.database.base import Base
+# Import the router that holds the /register and /login endpoints.
+from backend.controllers.auth_controller import router as auth_router
 
-# engine is the actual connection to PostgreSQL.
+# Base is what our models (like Notice, User) inherit from. engine is the
+# connection to PostgreSQL. Together they let us auto-create tables.
+from backend.database.base import Base
 from backend.database.session import engine
 
 # Creates all tables defined by models inheriting from Base, if they
-# don't already exist yet. This is what actually makes the "notices"
-# table appear in PostgreSQL the first time the app starts.
+# don't already exist yet. Importing auth_router above (which imports
+# the User model, indirectly) is what makes SQLAlchemy aware of the
+# "users" table before this line runs.
 Base.metadata.create_all(bind=engine)
 
 # Create the FastAPI application.
@@ -38,5 +40,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register the notice router with the FastAPI app.
+# Register both routers so their routes become part of the app.
 app.include_router(notice_router)
+app.include_router(auth_router)
