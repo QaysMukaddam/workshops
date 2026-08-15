@@ -16,3 +16,15 @@ python-dotenv
 
 # Used by FastAPI to define and validate request bodies (e.g. NoticeCreateRequest)
 pydantic
+
+
+# --- JWT / Authentication dependencies ---
+
+# Creates and verifies JWT access tokens (used to issue and check login tokens)
+python-jose[cryptography]
+
+# Hashes and verifies passwords securely using bcrypt (never store raw passwords)
+passlib[bcrypt]
+
+# Pinned to 4.0.1 — newer bcrypt versions break passlib's internal self-test
+bcrypt==4.0.1
