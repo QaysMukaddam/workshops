@@ -19,6 +19,10 @@ from backend.controllers.auth_controller import router as auth_router
 from backend.database.base import Base
 from backend.database.session import engine
 
+# Import the routers that hold the comment and like endpoints.
+from backend.controllers.comment_controller import router as comment_router
+from backend.controllers.like_controller import router as like_router
+
 # Creates all tables defined by models inheriting from Base, if they
 # don't already exist yet. Importing auth_router above (which imports
 # the User model, indirectly) is what makes SQLAlchemy aware of the
@@ -43,3 +47,7 @@ app.add_middleware(
 # Register both routers so their routes become part of the app.
 app.include_router(notice_router)
 app.include_router(auth_router)
+
+# Register the comment and like routers so their routes become part of the app.
+app.include_router(comment_router)
+app.include_router(like_router)
