@@ -64,11 +64,22 @@ async function request(endpoint, options = {}, token = null) {
 
 // --- Auth ---
 
-// Registers a new user. role defaults to MEMBER unless specified.
-export function registerUser(username, password, role = 'MEMBER') {
-  return request('/register', {
+// Creates a brand-new organization AND registers the requester as its
+// founding ADMIN in one call. Returns org_code, which must be shown to
+// the user afterward — it's the only time the backend sends it back.
+export function createOrganization(organizationName, username, password) {
+  return request('/organizations/create', {
     method: 'POST',
-    body: JSON.stringify({ username, password, role }),
+    body: JSON.stringify({ organization_name: organizationName, username, password }),
+  });
+}
+
+// Registers a new MEMBER under an existing organization, identified by
+// the org_code its admin shared.
+export function joinOrganization(orgCode, username, password) {
+  return request('/organizations/join', {
+    method: 'POST',
+    body: JSON.stringify({ org_code: orgCode, username, password }),
   });
 }
 
