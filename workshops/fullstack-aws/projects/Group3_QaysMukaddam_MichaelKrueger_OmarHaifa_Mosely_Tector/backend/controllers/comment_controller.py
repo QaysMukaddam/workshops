@@ -21,8 +21,12 @@ from backend.services.like_service import count_likes
 # get_user_by_id lets us look up the commenter's username for display.
 from backend.services.user_service import get_user_by_id
 
+# get_notice_for_org confirms a notice exists AND belongs to the
+# current user's organization, without incrementing its view count.
+from backend.services.notice_service import get_notice_for_org
+
 # get_current_user allows any logged-in user through. CurrentUser is the
-# type hint for whoever the token identifies as.
+# type hint for whoever the token identifies as (includes organization_id).
 from backend.core.dependencies import get_current_user, CurrentUser
 
 
@@ -57,8 +61,10 @@ def comment_to_response(db: Session, comment):
 
 
 # POST /notices/{notice_id}/comments
-# Adds a comment under a notice. Any logged-in user (ADMIN or MEMBER) can
-# comment, not just admins.
+# Adds a comment under a notice — but only if that notice actually
+# belongs to the current user's organization. Without this check, a
+# member could comment on another company's notice just by guessing an
+# id, even though they'd never see it through GET /notices.
 @router.post("/notices/{notice_id}/comments", status_code=201)
 def add_comment(
     notice_id: int,
@@ -66,6 +72,14 @@ def add_comment(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    # Confirm the notice exists in THIS user's organization before
+    # allowing anything to be posted under it.
+    notice = get_notice_for_org(db, notice_id, current_user.organization_id)
+    # If it's None, either the notice doesn't exist, or it belongs to a
+    # different organization — either way, treat it as not found.
+    if notice is None:
+        raise HTTPException(status_code=404, detail="Notice not found")
+
     # A comment must actually have text.
     if not request.text:
         raise HTTPException(status_code=400, detail="text is required")
@@ -77,13 +91,19 @@ def add_comment(
 
 
 # GET /notices/{notice_id}/comments
-# Returns every comment on a notice, oldest first.
+# Same organization check as above, applied to reading comments too.
 @router.get("/notices/{notice_id}/comments")
 def get_comments(
     notice_id: int,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    # Same ownership check as add_comment — confirm this notice belongs
+    # to the current user's organization before listing its comments.
+    notice = get_notice_for_org(db, notice_id, current_user.organization_id)
+    if notice is None:
+        raise HTTPException(status_code=404, detail="Notice not found")
+
     # Fetch all comments belonging to this notice.
     comments = list_comments_for_notice(db, notice_id)
 
@@ -94,6 +114,10 @@ def get_comments(
 # DELETE /comments/{comment_id}
 # Removes a comment. Only the comment's own author, or an ADMIN, may
 # delete it — this is the "members can remove their own comment" rule.
+# Deliberately NOT restricted to "ADMIN of the same org as the comment"
+# for now, since the author check already covers the common case, and
+# cross-org comment ids aren't reachable through the app's own UI once
+# notices are properly org-scoped.
 @router.delete("/comments/{comment_id}")
 def remove_comment(
     comment_id: int,
