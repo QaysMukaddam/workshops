@@ -3,7 +3,7 @@
 from fastapi import Depends, HTTPException, status
 
 # HTTPBearer reads the "Authorization: Bearer <token>" header and shows
-# Swagger a single "paste your token" field, with no username/password form.
+# Swagger a single "paste your token" field, with no username/password form. 
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from sqlalchemy.orm import Session
@@ -21,12 +21,15 @@ bearer_scheme = HTTPBearer()
 
 
 # A small object holding the identity of whoever's making the request,
-# so controllers don't have to keep re-querying the User table themselves.
+# so controllers don't have to keep re-querying the User table themselves. also carries organization_id, so controllers can scope queries
+# (e.g. "only this user's organization's notices") without a separate
+# database lookup.
 class CurrentUser:
-    def __init__(self, user_id: int, username: str, role: str):
+    def __init__(self, user_id: int, username: str, role: str, organization_id: int):
         self.user_id = user_id
         self.username = username
         self.role = role
+        self.organization_id = organization_id
 
     # Convenience method for role checks in controllers.
     def has_role(self, role_name: str) -> bool:
@@ -49,7 +52,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
-    return CurrentUser(user.id, user.username, user.role)
+    # Build CurrentUser straight from the User row, which already has
+    # organization_id on it — no need to pull org_id out of the token
+    # payload separately.
+    return CurrentUser(user.id, user.username, user.role, user.organization_id)
 
 
 # Builds a dependency that only allows specific roles through.
