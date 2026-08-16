@@ -52,3 +52,11 @@ def authenticate_user(db: Session, username: str, password: str):
 # registration.
 def get_user_by_username(db: Session, username: str):
     return db.query(User).filter(User.username == username).first()
+
+
+# Finds a single user by id. Used to look up a comment/like author's
+# username for display purposes.
+def get_user_by_id(db: Session, user_id: int):
+    # Query the User table for a row matching this id, return the first
+    # match (there can only be one, since id is the primary key).
+    return db.query(User).filter(User.id == user_id).first()
