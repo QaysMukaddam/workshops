@@ -1,7 +1,6 @@
 # APIRouter lets us define routes separately and plug them into main.py's app.
 # HTTPException lets us return proper error responses like 400/401.
-# Depends is how FastAPI injects a database session or other dependency
-# into an endpoint.
+# Depends is how FastAPI injects a database session into an endpoint.
 from fastapi import APIRouter, HTTPException, Depends
 
 # BaseModel defines the shape of the incoming request body.
@@ -13,8 +12,11 @@ from sqlalchemy.orm import Session
 # get_db opens a session for this request and closes it afterwards.
 from backend.database.session import get_db
 
-# Import the service functions that contain the actual logic.
+# Import the service functions that contain the actual user logic.
 from backend.services.user_service import register_user, authenticate_user, get_user_by_username
+
+# Import the service functions that contain the actual organization logic.
+from backend.services.organization_service import create_organization, get_organization_by_code
 
 # create_access_token builds a signed JWT for a logged-in user.
 from backend.core.security import create_access_token
@@ -25,53 +27,103 @@ from backend.core.security import create_access_token
 router = APIRouter()
 
 
-# Defines what the request body must look like when registering.
-class RegisterRequest(BaseModel):
-    # Default to None so we can return our own 400 error message when
-    # they're missing, instead of FastAPI's automatic validation error.
+# Request body for creating a brand-new organization. The requester
+# automatically becomes its founding ADMIN.
+class CreateOrganizationRequest(BaseModel):
+    # Defaults to None so we can return our own 400 error when missing.
+    organization_name: str = None
     username: str = None
     password: str = None
-    # Defaults to MEMBER so registration doesn't create an ADMIN by accident.
-    role: str = "MEMBER"
 
 
-# Defines what the request body must look like when logging in.
-# A plain JSON body instead of OAuth2's form data, so Swagger only shows
-# username and password, not grant_type/scope/client_id/client_secret.
+# Request body for joining an existing organization as a MEMBER, using
+# the org_code its admin shared.
+class JoinOrganizationRequest(BaseModel):
+    org_code: str = None
+    username: str = None
+    password: str = None
+
+
+# Request body for logging in.
 class LoginRequest(BaseModel):
     username: str = None
     password: str = None
 
 
-# POST /register
-# Creates a new user account. Anyone can register as MEMBER; creating an
-# ADMIN this way is intentionally allowed here for setup purposes, but in
-# a real deployment you'd lock that down further.
-@router.post("/register", status_code=201)
-def add_user(request: RegisterRequest, db: Session = Depends(get_db)):
-    # Both username and password are required to register.
-    if not request.username or not request.password:
-        raise HTTPException(status_code=400, detail="username and password are required")
+# POST /organizations/create
+# Creates a new organization AND registers the requester as its founding
+# ADMIN in one step. Returns the org_code so the frontend can display it
+# prominently — this is the ONLY time it's shown.
+@router.post("/organizations/create", status_code=201)
+def create_org_and_admin(request: CreateOrganizationRequest, db: Session = Depends(get_db)):
+    # All three fields are required to create an organization.
+    if not request.organization_name or not request.username or not request.password:
+        raise HTTPException(status_code=400, detail="organization_name, username, and password are required")
 
-    # Reject duplicate usernames before hitting the database's own
-    # unique constraint, so we can give a clearer error message.
+    # Reject duplicate usernames before creating anything.
     if get_user_by_username(db, request.username):
         raise HTTPException(status_code=400, detail="username already taken")
 
-    # Call the service layer to do the actual work of creating the user.
-    new_user = register_user(db, request.username, request.password, request.role)
+    # Create the organization first, so we have its id to link the user to.
+    new_org = create_organization(db, request.organization_name)
 
-    # Return the new user's info, but never the password or its hash.
-    return {"id": new_user.id, "username": new_user.username, "role": new_user.role}
+    # Register the requester as ADMIN of the org just created.
+    # Argument order: db, username, password, role ("ADMIN"), organization_id.
+    new_user = register_user(db, request.username, request.password, "ADMIN", new_org.id)
+
+    # Return everything the frontend needs, including the org_code to
+    # display to the new admin.
+    return {
+        "id": new_user.id,
+        "username": new_user.username,
+        "role": new_user.role,
+        "organization_id": new_org.id,
+        "organization_name": new_org.name,
+        "org_code": new_org.org_code,
+    }
+
+
+# POST /organizations/join
+# Registers a new MEMBER under an EXISTING organization, identified by
+# its org_code.
+@router.post("/organizations/join", status_code=201)
+def join_org_as_member(request: JoinOrganizationRequest, db: Session = Depends(get_db)):
+    # All three fields are required to join an organization.
+    if not request.org_code or not request.username or not request.password:
+        raise HTTPException(status_code=400, detail="org_code, username, and password are required")
+
+    # Look up the organization by its code. If nothing matches, the code
+    # is wrong — reject rather than silently creating an orphaned user.
+    org = get_organization_by_code(db, request.org_code)
+    if org is None:
+        raise HTTPException(status_code=400, detail="Invalid organization code")
+
+    # Reject duplicate usernames before creating anything.
+    if get_user_by_username(db, request.username):
+        raise HTTPException(status_code=400, detail="username already taken")
+
+    # Register the requester as a MEMBER of the organization found above.
+    # Argument order: db, username, password, role ("MEMBER"), organization_id.
+    new_user = register_user(db, request.username, request.password, "MEMBER", org.id)
+
+    return {
+        "id": new_user.id,
+        "username": new_user.username,
+        "role": new_user.role,
+        "organization_id": org.id,
+        "organization_name": org.name,
+    }
 
 
 # POST /login
-# Takes a simple JSON body ({"username": "...", "password": "..."})
+# Works the same regardless of which organization the user belongs to,
+# since organization_id lives on the User row itself, not in anything
+# login-specific.
 @router.post("/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
+    # Both fields are required to attempt a login.
     if not request.username or not request.password:
         raise HTTPException(status_code=400, detail="username and password are required")
-
 
     # Look up the user and verify their password in one call.
     user = authenticate_user(db, request.username, request.password)
