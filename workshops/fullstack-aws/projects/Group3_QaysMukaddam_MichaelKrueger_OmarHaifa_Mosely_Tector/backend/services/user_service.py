@@ -10,12 +10,15 @@ from backend.models.user import User
 from backend.core.security import hash_password, verify_password
 
 
-# Creates a new user with a securely hashed password.
-# role defaults to "MEMBER" so only an explicit request can create an ADMIN.
-def register_user(db: Session, username: str, password: str, role: str = "MEMBER"):
-    # Build the Python object in memory. The password is hashed here, so
-    # the raw password is never written to the database or held past this line.
-    new_user = User(username, hash_password(password), role)
+# Creates a new user tied to a specific organization, with a securely
+# hashed password.
+# Parameter order: db, username, password, role, organization_id.
+def register_user(db: Session, username: str, password: str, role: str, organization_id: int):
+    # Build the Python object in memory first — nothing is saved yet.
+    # Matches User's constructor order exactly: username, hashed_password,
+    # role, organization_id. The password is hashed here, so the raw
+    # password never gets written to the database.
+    new_user = User(username, hash_password(password), role, organization_id)
 
     # Stage the new object to be inserted.
     db.add(new_user)
@@ -57,6 +60,4 @@ def get_user_by_username(db: Session, username: str):
 # Finds a single user by id. Used to look up a comment/like author's
 # username for display purposes.
 def get_user_by_id(db: Session, user_id: int):
-    # Query the User table for a row matching this id, return the first
-    # match (there can only be one, since id is the primary key).
     return db.query(User).filter(User.id == user_id).first()
