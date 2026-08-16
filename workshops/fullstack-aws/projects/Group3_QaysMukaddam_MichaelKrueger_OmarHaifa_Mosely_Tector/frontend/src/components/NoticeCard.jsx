@@ -1,12 +1,17 @@
-// useState tracks whether THIS user has liked the notice (see the note
-// below about why this starts as false every page load).
+// useState tracks the like count, whether THIS user has liked it, and
+// whether a like/unlike request is currently in progress.
 import { useState } from 'react';
 
 // Link makes the whole card clickable, navigating to the notice's detail page.
 import { Link } from 'react-router-dom';
 
+// The API functions that call the backend's like/unlike endpoints.
 import { likeNotice, unlikeNotice } from '../api/api';
+
+// Gives access to the current JWT token, needed for authenticated requests.
 import { useAuth } from '../context/AuthContext';
+
+// Reusable glass-panel container.
 import Card from './Card';
 
 // Displays one notice in the list: name, message, date, view count, and
@@ -19,11 +24,15 @@ export default function NoticeCard({ notice }) {
   // without waiting for a full page refetch.
   const [likeCount, setLikeCount] = useState(notice.like_count);
 
-  // NOTE: the backend's GET /notices doesn't currently say whether THIS
-  // user already liked a notice, only the total count — so this starts
-  // false on every page load, even if you'd liked it in a past session.
-  // Clicking still works correctly within the current session.
+  // Whether THIS user has liked this notice, tracked only for the
+  // current session (the backend doesn't tell us this on page load,
+  // only the total count).
   const [liked, setLiked] = useState(false);
+
+  // True while a like/unlike request is in flight. Prevents rapid
+  // repeat clicks from firing duplicate requests before the first
+  // one's response comes back and updates `liked`.
+  const [likePending, setLikePending] = useState(false);
 
   // Handles clicking the like button.
   async function handleLikeClick(e) {
@@ -32,6 +41,11 @@ export default function NoticeCard({ notice }) {
     e.preventDefault();
     e.stopPropagation();
 
+    // Ignore clicks while a request is already running.
+    if (likePending) return;
+
+    // Mark a request as in progress, disabling the button via JSX below.
+    setLikePending(true);
     try {
       if (liked) {
         // Already liked — this click means "unlike".
@@ -45,8 +59,21 @@ export default function NoticeCard({ notice }) {
         setLiked(true);
       }
     } catch (err) {
-      // Log rather than crash the page if the request fails.
-      console.error(err.message);
+      // If the backend says we're out of sync with reality (e.g. this
+      // was already liked from a previous session, or already unliked),
+      // correct our local state to match instead of leaving the button
+      // stuck in the wrong mode.
+      if (err.message.includes('already liked')) {
+        setLiked(true);
+      } else if (err.message.includes("haven't liked")) {
+        setLiked(false);
+      } else {
+        // Some other, unexpected error — log it rather than crash the page.
+        console.error(err.message);
+      }
+    } finally {
+      // Always clear the pending flag, whether the request succeeded or failed.
+      setLikePending(false);
     }
   }
 
@@ -65,8 +92,13 @@ export default function NoticeCard({ notice }) {
         <div className="flex items-center gap-4 text-sm text-gray-400">
           <span>👁 {notice.view_count} views</span>
           {/* Color changes to the accent color once liked, giving clear
-              visual feedback. */}
-          <button onClick={handleLikeClick} className={`flex items-center gap-1 ${liked ? 'text-accent' : 'text-gray-400'} hover:text-accent transition-colors`}>
+              visual feedback. disabled while a request is running, so
+              rapid clicks can't fire duplicate requests. */}
+          <button
+            onClick={handleLikeClick}
+            disabled={likePending}
+            className={`flex items-center gap-1 ${liked ? 'text-accent' : 'text-gray-400'} hover:text-accent transition-colors disabled:opacity-50`}
+          >
             ❤ {likeCount}
           </button>
         </div>
