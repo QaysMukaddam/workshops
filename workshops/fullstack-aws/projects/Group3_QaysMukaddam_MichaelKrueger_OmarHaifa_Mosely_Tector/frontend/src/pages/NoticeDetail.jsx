@@ -45,24 +45,25 @@ export default function NoticeDetail() {
 
   // Tracks whether THIS user has liked the notice, within this session.
   // Starts false every page load since the backend only returns a total
-  // count, not "did I personally like this" — same limitation as
-  // NoticeCard's like button.
+  // count, not "did I personally like this".
   const [liked, setLiked] = useState(false);
 
+  // True while a like/unlike request is in flight. Prevents rapid
+  // repeat clicks from firing duplicate requests before the first one's
+  // response comes back and updates `liked`.
+  const [likePending, setLikePending] = useState(false);
+
   // Tracks which noticeId has already been fetched. React 18's
-  // StrictMode intentionally runs effects twice in development (to help
-  // catch bugs), which would otherwise call getNotice() — and therefore
-  // increment the view count — twice per visit. This ref stops the
-  // second call.
+  // StrictMode intentionally runs effects twice in development, which
+  // would otherwise call getNotice() — and therefore increment the view
+  // count — twice per visit. This ref stops the second call.
   const fetchedIdRef = useRef(null);
 
-  // Runs when the page loads, and again whenever noticeId changes (e.g.
-  // clicking from one notice straight into another).
+  // Runs when the page loads, and again whenever noticeId changes.
   useEffect(() => {
     // Already fetched this exact notice — skip the duplicate call.
     if (fetchedIdRef.current === noticeId) return;
-    // Mark this notice as fetched before the async call starts, so the
-    // StrictMode re-invoke sees it's already been handled.
+    // Mark this notice as fetched before the async call starts.
     fetchedIdRef.current = noticeId;
     loadData();
   }, [noticeId]);
@@ -85,12 +86,15 @@ export default function NoticeDetail() {
 
   // Toggles liking/unliking the notice itself (not a comment).
   async function handleLikeClick() {
+    // Ignore clicks while a request is already running.
+    if (likePending) return;
+
+    setLikePending(true);
     try {
       if (liked) {
         // Already liked — this click means "unlike".
         await unlikeNotice(noticeId, token);
-        // Update the like_count inside the notice object directly,
-        // instead of refetching the whole notice.
+        // Update the like_count inside the notice object directly.
         setNotice((n) => ({ ...n, like_count: n.like_count - 1 }));
         setLiked(false);
       } else {
@@ -100,8 +104,17 @@ export default function NoticeDetail() {
         setLiked(true);
       }
     } catch (err) {
-      // Log rather than crash the page if the request fails.
-      console.error(err.message);
+      // Correct local state if the backend says we're out of sync,
+      // instead of leaving the button stuck in the wrong mode.
+      if (err.message.includes('already liked')) {
+        setLiked(true);
+      } else if (err.message.includes("haven't liked")) {
+        setLiked(false);
+      } else {
+        console.error(err.message);
+      }
+    } finally {
+      setLikePending(false);
     }
   }
 
@@ -124,8 +137,7 @@ export default function NoticeDetail() {
     }
   }
 
-  // ADMIN-only: deletes the whole notice, then returns to the dashboard
-  // since there's nothing left here to show.
+  // ADMIN-only: deletes the whole notice, then returns to the dashboard.
   async function handleDeleteNotice() {
     try {
       await deleteNotice(noticeId, token);
@@ -135,9 +147,8 @@ export default function NoticeDetail() {
     }
   }
 
-  // Passed down into CommentList so that when a comment is deleted, it
-  // disappears from this page's state immediately, without needing a
-  // full refetch of all comments.
+  // Passed down into CommentList so a deleted comment disappears from
+  // this page's state immediately, without needing a full refetch.
   function handleCommentDeleted(commentId) {
     setComments((prev) => prev.filter((c) => c.id !== commentId));
   }
@@ -179,8 +190,13 @@ export default function NoticeDetail() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4 text-sm text-gray-400">
               <span>👁 {notice.view_count} views</span>
-              {/* Color changes to accent once liked, for clear feedback. */}
-              <button onClick={handleLikeClick} className={`${liked ? 'text-accent' : 'text-gray-400'} hover:text-accent transition-colors`}>
+              {/* disabled while a request is running, so rapid clicks
+                  can't fire duplicate requests. */}
+              <button
+                onClick={handleLikeClick}
+                disabled={likePending}
+                className={`${liked ? 'text-accent' : 'text-gray-400'} hover:text-accent transition-colors disabled:opacity-50`}
+              >
                 ❤ {notice.like_count}
               </button>
             </div>
