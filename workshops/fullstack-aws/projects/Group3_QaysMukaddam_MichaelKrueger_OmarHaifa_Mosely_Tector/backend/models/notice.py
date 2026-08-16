@@ -1,6 +1,7 @@
 # Column defines a table column with a specific data type.
-# Integer, String, DateTime are the SQL types for each field below.
-from sqlalchemy import Column, Integer, String, DateTime
+# Integer, String, DateTime are the SQL types for each field below. ForeignKey links this table to another
+# table's primary key (here, organizations.id).
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 
 # func gives access to SQL functions like now(), used below for created_at.
 from sqlalchemy.sql import func
@@ -33,10 +34,16 @@ class Notice(Base):
     # default=0 means every new notice starts at zero views.
     view_count = Column(Integer, default=0, nullable=False)
 
+    # Which organization's board this notice belongs to. This is what
+    # makes members only ever see their own organization's notices.
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+
     # Custom constructor so we can write Notice("Alice", "Meeting at 3pm")
     # instead of having to name every argument. **kwargs lets extra fields
     # (like id, if ever needed) still get passed through to the base class.
-    def __init__(self, name: str, message: str, **kwargs):
+    # Constructor now also requires organization_id.
+
+    def __init__(self, name: str, message: str, organization_id: int, **kwargs):
         # super().__init__() is SQLAlchemy's own constructor — this is what
         # actually assigns the values to the row's columns.
-        super().__init__(name=name, message=message, **kwargs)
+        super().__init__(name=name, message=message, organization_id=organization_id, **kwargs)
