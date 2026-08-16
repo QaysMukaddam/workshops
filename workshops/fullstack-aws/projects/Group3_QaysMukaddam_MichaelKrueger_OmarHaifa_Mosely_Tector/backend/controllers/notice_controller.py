@@ -20,23 +20,18 @@ from backend.services.like_service import count_likes
 
 # require_role restricts a route to specific roles. get_current_user
 # allows any logged-in user through. CurrentUser is the type hint for
-# whoever the token identifies as.
+# whoever the token identifies as (now includes organization_id).
 from backend.core.dependencies import require_role, get_current_user, CurrentUser
 
 
-# Create a router for notice-related endpoints. main.py will register
-# this with app.include_router(...).
 router = APIRouter()
 
 
-# Defines what the request body must look like when posting a notice.
 class NoticeCreateRequest(BaseModel):
     name: str = None
     message: str = None
 
 
-# Turns a Notice object into a plain dictionary for the JSON response.
-# Includes view_count and like_count alongside the original fields.
 def notice_to_response(db: Session, notice):
     return {
         "id": notice.id,
@@ -49,7 +44,9 @@ def notice_to_response(db: Session, notice):
 
 
 # POST /notices
-# Creates a new notice. Only a logged-in ADMIN can post.
+# Creates a new notice on the ADMIN's OWN organization's board.
+# organization_id comes from current_user, not from the request body —
+# an admin has no way to post to a different organization's board.
 @router.post("/notices", status_code=201)
 def add_notice(
     request: NoticeCreateRequest,
@@ -59,31 +56,34 @@ def add_notice(
     if not request.name or not request.message:
         raise HTTPException(status_code=400, detail="name and message are required")
 
-    new_notice = create_notice(db, request.name, request.message)
+    new_notice = create_notice(db, request.name, request.message, current_user.organization_id)
 
     return notice_to_response(db, new_notice)
 
 
 # GET /notices
-# Returns every notice currently posted, most recent first. Requires
-# login (any role) — this board is private to the organization.
+# Returns only notices belonging to the CURRENT USER's organization —
+# this is what keeps each company's board private to its own members.
 @router.get("/notices")
 def get_all_notices(db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    notices = list_notices(db)
+    notices = list_notices(db, current_user.organization_id)
 
     return [notice_to_response(db, notice) for notice in notices]
 
 
 # GET /notices/{notice_id}
-# Returns a single notice, incrementing its view_count each time it's
-# opened this way. Requires login, same as viewing the full list.
+# Fetches a single notice, but ONLY if it belongs to the current user's
+# organization. If someone tries an id from a different org, it comes
+# back as 404 — same response as if it didn't exist at all, so we don't
+# even confirm to an attacker that a different org's notice with that
+# id exists.
 @router.get("/notices/{notice_id}")
 def get_single_notice(
     notice_id: int,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    notice = get_notice_by_id(db, notice_id)
+    notice = get_notice_by_id(db, notice_id, current_user.organization_id)
 
     if notice is None:
         raise HTTPException(status_code=404, detail="Notice not found")
@@ -92,14 +92,15 @@ def get_single_notice(
 
 
 # DELETE /notices/{notice_id}
-# Removes a notice from the board by id. Only a logged-in ADMIN can delete.
+# Same organization check as above — an admin can only delete notices
+# that belong to their own organization.
 @router.delete("/notices/{notice_id}")
 def remove_notice(
     notice_id: int,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_role("ADMIN")),
 ):
-    was_deleted = delete_notice(db, notice_id)
+    was_deleted = delete_notice(db, notice_id, current_user.organization_id)
 
     if not was_deleted:
         raise HTTPException(status_code=404, detail="Notice not found")
