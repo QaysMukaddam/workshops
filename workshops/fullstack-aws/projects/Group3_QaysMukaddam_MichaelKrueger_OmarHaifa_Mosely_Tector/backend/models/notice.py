@@ -29,6 +29,10 @@ class Notice(Base):
     # when the row is inserted, so we never have to set it manually.
     created_at = Column(DateTime, server_default=func.now())
 
+    # tracks how many times this notice has been viewed.
+    # default=0 means every new notice starts at zero views.
+    view_count = Column(Integer, default=0, nullable=False)
+
     # Custom constructor so we can write Notice("Alice", "Meeting at 3pm")
     # instead of having to name every argument. **kwargs lets extra fields
     # (like id, if ever needed) still get passed through to the base class.
