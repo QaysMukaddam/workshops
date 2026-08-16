@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 # Import the Comment class so we can query and create rows through it.
 from backend.models.comment import Comment
 
+# Import Like so delete_comment can remove any likes on a comment
+# before the comment itself gets deleted.
+from backend.models.like import Like
+
 
 # Creates a new comment under a notice.
 # db is the database session. notice_id/user_id/text are the values to store.
@@ -38,19 +42,24 @@ def get_comment_by_id(db: Session, comment_id: int):
     return db.query(Comment).filter(Comment.id == comment_id).first()
 
 
-# Deletes a comment by id.
+# Deletes a comment by id, first removing any likes on it — without this,
+# PostgreSQL's foreign key constraint would block the delete (a like
+# can't point to a comment that no longer exists).
 # Returns True if it worked, False if no comment had that id.
 def delete_comment(db: Session, comment_id: int):
-    # Look up the comment first — we need the actual object to delete it.
+    # Look up the comment first — we need to confirm it exists.
     comment = db.query(Comment).filter(Comment.id == comment_id).first()
 
     # If nothing matched, there's nothing to delete.
     if comment is None:
         return False
 
-    # Stage the deletion.
+    # Remove any likes on this comment first.
+    db.query(Like).filter(Like.comment_id == comment_id).delete()
+
+    # Now it's safe to delete the comment itself.
     db.delete(comment)
-    # Commit it, actually removing the row from PostgreSQL.
+    # Commit both deletions as one transaction.
     db.commit()
 
     return True
