@@ -10,79 +10,77 @@ from backend.models.notice import Notice
 from backend.models.comment import Comment
 from backend.models.like import Like
 
-# Creates a new notice and saves it to the notices table.
-# db is the database session. name/message are the values to store.
-def create_notice(db: Session, name: str, message: str):
-    # Build the Python object in memory first — nothing is saved yet.
-    new_notice = Notice(name, message)
 
-    # Stage the new object to be inserted.
+# Creates a new notice, tied to a specific organization.
+# organization_id comes from the requester's own account, not from user
+# input, so an admin can only ever post to their own org's board.
+def create_notice(db: Session, name: str, message: str, organization_id: int):
+    new_notice = Notice(name, message, organization_id)
+
     db.add(new_notice)
-    # Actually write it to PostgreSQL.
     db.commit()
-    # Reload the object so it picks up the id and created_at that
-    # PostgreSQL generated during the commit.
     db.refresh(new_notice)
 
     return new_notice
 
 
-# Returns every notice, most recent first.
-def list_notices(db: Session):
-    # .order_by(Notice.id.desc()) sorts highest id (newest) first.
-    return db.query(Notice).order_by(Notice.id.desc()).all()
+# Returns every notice belonging to a specific organization, most recent
+# first. This is what makes members only ever see their own org's board.
+def list_notices(db: Session, organization_id: int):
+    return db.query(Notice).filter(Notice.organization_id == organization_id).order_by(Notice.id.desc()).all()
 
 
-# Deletes a notice by id, along with everything that references it —
-# any likes directly on the notice, any comments on it, and any likes on
-# those comments. Without this cleanup, PostgreSQL's foreign key
-# constraints would block the delete (a comment can't point to a notice
-# that no longer exists).
-# Returns True if it worked, False if no notice had that id.
-def delete_notice(db: Session, notice_id: int):
-    # Look up the notice first — we need to confirm it exists.
-    notice = db.query(Notice).filter(Notice.id == notice_id).first()
+# Looks up a single notice by id AND organization_id, incrementing its
+# view count. Requiring BOTH means a user can't view a notice from a
+# different organization just by guessing/entering another id in the URL.
+# Returns None if no matching notice exists in THIS organization.
+def get_notice_by_id(db: Session, notice_id: int, organization_id: int):
+    notice = db.query(Notice).filter(
+        Notice.id == notice_id,
+        Notice.organization_id == organization_id,
+    ).first()
 
-    # If nothing matched, there's nothing to delete.
-    if notice is None:
-        return False
-
-    # Remove any likes made directly on this notice.
-    db.query(Like).filter(Like.notice_id == notice_id).delete()
-
-    # Find every comment on this notice, so we can clean up their likes too.
-    comment_ids = [c.id for c in db.query(Comment).filter(Comment.notice_id == notice_id).all()]
-
-    # Only bother if there are actually comments to clean up.
-    if comment_ids:
-        # Remove likes on any of those comments.
-        db.query(Like).filter(Like.comment_id.in_(comment_ids)).delete(synchronize_session=False)
-        # Remove the comments themselves.
-        db.query(Comment).filter(Comment.notice_id == notice_id).delete()
-
-    # Now it's safe to delete the notice itself.
-    db.delete(notice)
-    # Commit everything as one transaction.
-    db.commit()
-    return True
-
-
-# Looks up a single notice by id and increments its view count by one.
-# Called every time someone opens the notice individually.
-# Returns the notice, or None if no notice has that id.
-def get_notice_by_id(db: Session, notice_id: int):
-    # Query for the row matching this id.
-    notice = db.query(Notice).filter(Notice.id == notice_id).first()
-
-    # Nothing to view if it doesn't exist.
     if notice is None:
         return None
 
-    # Bump the view count by one.
     notice.view_count += 1
-    # Save the updated count to PostgreSQL.
     db.commit()
-    # Reload the object so it reflects the new committed value.
     db.refresh(notice)
 
     return notice
+
+
+# Deletes a notice by id AND organization_id — same cross-org protection
+# as get_notice_by_id. Also cleans up related likes and comments first,
+# same as before.
+def delete_notice(db: Session, notice_id: int, organization_id: int):
+    notice = db.query(Notice).filter(
+        Notice.id == notice_id,
+        Notice.organization_id == organization_id,
+    ).first()
+
+    if notice is None:
+        return False
+
+    db.query(Like).filter(Like.notice_id == notice_id).delete()
+
+    comment_ids = [c.id for c in db.query(Comment).filter(Comment.notice_id == notice_id).all()]
+
+    if comment_ids:
+        db.query(Like).filter(Like.comment_id.in_(comment_ids)).delete(synchronize_session=False)
+        db.query(Comment).filter(Comment.notice_id == notice_id).delete()
+
+    db.delete(notice)
+    db.commit()
+
+    return True
+
+# Looks up a notice by id AND organization_id WITHOUT incrementing its
+# view count. Used by other controllers (like comments) that just need
+# to confirm a notice exists in the user's org, without that check
+# itself counting as a "view".
+def get_notice_for_org(db: Session, notice_id: int, organization_id: int):
+    return db.query(Notice).filter(
+        Notice.id == notice_id,
+        Notice.organization_id == organization_id,
+    ).first()
