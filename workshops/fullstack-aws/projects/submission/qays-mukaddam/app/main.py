@@ -38,7 +38,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
-    allow_origins=["http://student-qays-noticeboard.s3-website-us-east-1.amazonaws.com"],
+    allow_origins=["http://student-qays-noticeboard.s3-website-us-east-1.amazonaws.com", "https://d1iv7abo9yxszk.cloudfront.net"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
